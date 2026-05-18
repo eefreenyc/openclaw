@@ -1,3 +1,4 @@
+import * as childProcess from "node:child_process";
 import { createCipheriv, createDecipheriv, createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -11,6 +12,8 @@ const LEGACY_OAUTH_SECRET_DIRNAME = "auth-profiles";
 const LEGACY_OAUTH_SECRET_VERSION = 1;
 const LEGACY_OAUTH_SECRET_ALGORITHM = "aes-256-gcm";
 const LEGACY_OAUTH_SECRET_KEY_ENV = "OPENCLAW_AUTH_PROFILE_SECRET_KEY";
+const LEGACY_OAUTH_SECRET_KEYCHAIN_SERVICE = "OpenClaw Auth Profile Secrets";
+const LEGACY_OAUTH_SECRET_KEYCHAIN_ACCOUNT = "oauth-profile-master-key";
 const LEGACY_OAUTH_SECRET_KEY_FILE_NAME = "auth-profile-secret-key";
 
 export type LegacyOAuthRef = {
@@ -206,6 +209,42 @@ function readLegacyOAuthSecretKeyFile(env: NodeJS.ProcessEnv): string | undefine
   }
 }
 
+function readLegacyMacOAuthSecretKeychainKey(params: {
+  allowKeychainPrompt?: boolean;
+  env: NodeJS.ProcessEnv;
+}): string | undefined {
+  if (
+    process.platform !== "darwin" ||
+    params.allowKeychainPrompt === false ||
+    params.env.VITEST === "true" ||
+    params.env.VITEST_WORKER_ID !== undefined
+  ) {
+    return undefined;
+  }
+  try {
+    // Read-only compatibility for #79006 sidecar OAuth profiles. Do not add
+    // writes, creation, prompts, or new OS-level Keychain integrations here.
+    // This exists only to keep affected users working until doctor migrates
+    // them back to inline auth-profiles.json OAuth credentials.
+    return childProcess
+      .execFileSync(
+        "security",
+        [
+          "find-generic-password",
+          "-s",
+          LEGACY_OAUTH_SECRET_KEYCHAIN_SERVICE,
+          "-a",
+          LEGACY_OAUTH_SECRET_KEYCHAIN_ACCOUNT,
+          "-w",
+        ],
+        { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] },
+      )
+      .trim();
+  } catch {
+    return undefined;
+  }
+}
+
 function resolveLegacyOAuthSecretKeySeeds(env: NodeJS.ProcessEnv): string[] {
   const seeds: string[] = [];
   const addSeed = (value: string | undefined): void => {
@@ -261,6 +300,7 @@ function decryptLegacyOAuthSecretMaterial(params: {
   provider: string;
   encrypted: LegacyOAuthEncryptedPayload;
   env: NodeJS.ProcessEnv;
+  allowKeychainPrompt?: boolean;
 }): LegacyOAuthSecretMaterial | null {
   const seeds = resolveLegacyOAuthSecretKeySeeds(params.env);
   for (const seed of seeds) {
@@ -269,6 +309,13 @@ function decryptLegacyOAuthSecretMaterial(params: {
       return material;
     }
   }
+  const keychainSeed = readLegacyMacOAuthSecretKeychainKey({
+    allowKeychainPrompt: params.allowKeychainPrompt,
+    env: params.env,
+  });
+  if (keychainSeed && !seeds.includes(keychainSeed)) {
+    return decryptLegacyOAuthSecretMaterialWithSeed(params, keychainSeed);
+  }
   return null;
 }
 
@@ -276,6 +323,7 @@ export function loadLegacyOAuthSidecarMaterial(params: {
   ref: LegacyOAuthRef;
   profileId: string;
   provider: string;
+  allowKeychainPrompt?: boolean;
   env?: NodeJS.ProcessEnv;
 }): LegacyOAuthSecretMaterial | null {
   const env = params.env ?? process.env;
@@ -298,6 +346,7 @@ export function loadLegacyOAuthSidecarMaterial(params: {
       provider: params.provider,
       encrypted,
       env,
+      allowKeychainPrompt: params.allowKeychainPrompt,
     });
   }
   return normalizeLegacyOAuthSecretMaterial(raw);

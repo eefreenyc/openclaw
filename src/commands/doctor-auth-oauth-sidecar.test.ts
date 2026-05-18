@@ -11,8 +11,8 @@ import { __testing, maybeRepairLegacyOAuthSidecarProfiles } from "./doctor-auth-
 import type { DoctorPrompter } from "./doctor-prompter.js";
 
 const execFileSyncMock = vi.hoisted(() =>
-  vi.fn(() => {
-    throw new Error("doctor OAuth sidecar repair must not read Keychain");
+  vi.fn<() => string>(() => {
+    throw new Error("unexpected doctor OAuth sidecar Keychain read");
   }),
 );
 
@@ -104,7 +104,7 @@ function encryptLegacySidecarMaterial(params: {
 }
 
 function expectReauthWarning(profileId: string, authPath: string): string {
-  return `Could not decrypt legacy OAuth sidecar for ${profileId} in ${authPath}; OpenClaw no longer reads macOS Keychain for legacy sidecar secrets. Re-authenticate with openclaw models auth login --provider openai-codex.`;
+  return `Could not decrypt legacy OAuth sidecar for ${profileId} in ${authPath}. Re-authenticate with openclaw models auth login --provider openai-codex.`;
 }
 
 afterEach(async () => {
@@ -281,7 +281,7 @@ describe("maybeRepairLegacyOAuthSidecarProfiles", () => {
     expect(JSON.parse(fs.readFileSync(authPath, "utf8"))).toEqual(auth);
   });
 
-  it("does not read macOS Keychain while repairing undecryptable legacy sidecars", async () => {
+  it("uses macOS Keychain as a read-only fallback while repairing legacy sidecars", async () => {
     const state = await makeTestState("wrong-seed");
     const profileId = "openai-codex:default";
     const ref = {
@@ -318,17 +318,42 @@ describe("maybeRepairLegacyOAuthSidecarProfiles", () => {
     const restoreVitest = withEnvValue("VITEST", undefined);
     const restoreVitestWorker = withEnvValue("VITEST_WORKER_ID", undefined);
     const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
-    execFileSyncMock.mockClear();
+    execFileSyncMock.mockReturnValueOnce("keychain-only-seed\n");
     try {
       const result = await maybeRepairLegacyOAuthSidecarProfiles({
         cfg: {},
         prompter: makePrompter(true),
+        now: () => 456,
       });
 
       expect(result.detected).toEqual([authPath]);
-      expect(result.changes).toStrictEqual([]);
-      expect(result.warnings).toStrictEqual([expectReauthWarning(profileId, authPath)]);
-      expect(execFileSyncMock).not.toHaveBeenCalled();
+      expect(result.changes).toStrictEqual([
+        `Migrated 1 sidecar-backed Codex OAuth profile in ${authPath} to inline credentials (backup: ${authPath}.oauth-ref.456.bak).`,
+      ]);
+      expect(result.warnings).toStrictEqual([]);
+      expect(execFileSyncMock).toHaveBeenCalledWith(
+        "security",
+        [
+          "find-generic-password",
+          "-s",
+          "OpenClaw Auth Profile Secrets",
+          "-a",
+          "oauth-profile-master-key",
+          "-w",
+        ],
+        { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] },
+      );
+      expect(JSON.parse(fs.readFileSync(authPath, "utf8"))).toEqual({
+        version: 1,
+        profiles: {
+          [profileId]: {
+            type: "oauth",
+            provider: "openai-codex",
+            access: "access-token",
+            refresh: "refresh-token",
+          },
+        },
+      });
     } finally {
       platformSpy.mockRestore();
       restoreVitestWorker();

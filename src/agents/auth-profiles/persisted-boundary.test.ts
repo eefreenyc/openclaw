@@ -9,7 +9,7 @@ import { resolveAuthStorePath } from "./paths.js";
 import { coercePersistedAuthProfileStore, loadPersistedAuthProfileStore } from "./persisted.js";
 
 const execFileSyncMock = vi.hoisted(() =>
-  vi.fn(() => {
+  vi.fn<() => string>(() => {
     throw new Error("legacy OAuth sidecar runtime must not read Keychain");
   }),
 );
@@ -224,7 +224,7 @@ describe("persisted auth profile boundary", () => {
     }
   });
 
-  it("does not read macOS Keychain when legacy sidecar decryption lacks an explicit seed", () => {
+  it("uses macOS Keychain as a read-only fallback for legacy sidecar decryption", () => {
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-auth-oauthref-no-keychain-"));
     const agentDir = path.join(stateDir, "agents", "main", "agent");
     const restoreStateDir = withEnvValue("OPENCLAW_STATE_DIR", stateDir);
@@ -233,7 +233,7 @@ describe("persisted auth profile boundary", () => {
     const restoreVitest = withEnvValue("VITEST", undefined);
     const restoreVitestWorker = withEnvValue("VITEST_WORKER_ID", undefined);
     const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
-    execFileSyncMock.mockClear();
+    execFileSyncMock.mockReturnValueOnce("keychain-only-seed\n");
     try {
       fs.mkdirSync(agentDir, { recursive: true });
       const profileId = "openai-codex:default";
@@ -292,10 +292,21 @@ describe("persisted auth profile boundary", () => {
       expect(credential).toMatchObject({
         type: "oauth",
         provider: "openai-codex",
+        access: "legacy-access-token",
+        refresh: "legacy-refresh-token",
       });
-      expect(credential).not.toHaveProperty("access");
-      expect(credential).not.toHaveProperty("refresh");
-      expect(execFileSyncMock).not.toHaveBeenCalled();
+      expect(execFileSyncMock).toHaveBeenCalledWith(
+        "security",
+        [
+          "find-generic-password",
+          "-s",
+          "OpenClaw Auth Profile Secrets",
+          "-a",
+          "oauth-profile-master-key",
+          "-w",
+        ],
+        { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] },
+      );
     } finally {
       platformSpy.mockRestore();
       restoreVitestWorker();

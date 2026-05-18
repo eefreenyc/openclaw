@@ -79,10 +79,15 @@ type ExternalCliSyncResult = {
 };
 
 function resolvePersistedLoadOptions(
-  options: Pick<LoadAuthProfileStoreOptions, "resolveLegacyOAuthSidecars"> | undefined,
-): { resolveLegacyOAuthSidecars?: boolean } {
+  options:
+    | Pick<LoadAuthProfileStoreOptions, "allowKeychainPrompt" | "resolveLegacyOAuthSidecars">
+    | undefined,
+): { allowKeychainPrompt?: boolean; resolveLegacyOAuthSidecars?: boolean } {
   return {
     resolveLegacyOAuthSidecars: options?.resolveLegacyOAuthSidecars ?? true,
+    ...(options?.allowKeychainPrompt !== undefined
+      ? { allowKeychainPrompt: options.allowKeychainPrompt }
+      : {}),
   };
 }
 

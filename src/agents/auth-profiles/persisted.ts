@@ -35,6 +35,7 @@ import type {
 export type LegacyAuthStore = Record<string, AuthProfileCredential>;
 
 type LoadPersistedAuthProfileStoreOptions = {
+  allowKeychainPrompt?: boolean;
   resolveLegacyOAuthSidecars?: boolean;
 };
 
@@ -277,13 +278,14 @@ function resolveLegacyOAuthSidecarCredential(params: {
   ) {
     return params.credential;
   }
-  // Read-only compatibility for #79006 sidecar OAuth profiles. Do not add new
-  // writers, prompts, or OS-level Keychain access here; encrypted sidecars must
-  // decrypt from explicit env/file seeds or be repaired by doctor/re-auth.
+  // Read-only compatibility for #79006 sidecar OAuth profiles. Do not add
+  // new writers or OS-level Keychain creation here; doctor remains the path
+  // that migrates users back to canonical inline OAuth credentials.
   const material = loadLegacyOAuthSidecarMaterial({
     ref: params.raw.oauthRef,
     profileId: params.profileId,
     provider: params.credential.provider,
+    allowKeychainPrompt: params.options?.allowKeychainPrompt,
   });
   if (!material) {
     return params.credential;
@@ -803,7 +805,7 @@ function preserveLegacyOAuthRefsForDoctorMigration(
       const isRuntimeSidecarMaterial =
         options?.runtimeLegacyOAuthSidecarProfileIds?.has(profileId) === true;
       // Untracked inline material may be a real token refresh. Only reread the
-      // sidecar then, and never use Keychain from this save-path check.
+      // sidecar then, preserving the same read-only legacy decryption fallback.
       if (
         !isRuntimeSidecarMaterial &&
         !isUnchangedLegacyOAuthSidecarMaterial({ profileId, rawProfile, credential })
