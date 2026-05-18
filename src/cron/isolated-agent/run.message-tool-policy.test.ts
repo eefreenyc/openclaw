@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SkillSnapshot } from "../../agents/skills.js";
+import { createSourceDeliveryPlan } from "../../infra/outbound/source-delivery-plan.js";
 import type { CronDeliveryMode } from "../types.js";
 import type { MutableCronSession } from "./run-session-state.js";
 import {
@@ -249,7 +250,17 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
     expect(dispatchCronDeliveryMock).toHaveBeenCalledTimes(1);
     expectDispatchFields({
       deliveryRequested: true,
-      skipMessagingToolDelivery: true,
+      sourceDeliveryOutcome: {
+        visibleDeliveries: [
+          {
+            via: "message_tool",
+            verifiedTarget: true,
+            target: { tool: "message", provider: "messagechat", to: "123" },
+          },
+        ],
+        satisfiesSourceDelivery: true,
+        unverifiedMessageToolDelivery: false,
+      },
     });
     expectDeliveryFields(result.delivery, {
       intended: { channel: "messagechat", to: "123", source: "explicit" },
@@ -320,13 +331,20 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
       thinkLevel: undefined,
       timeoutMs: 60_000,
       senderIsOwner: true,
-      messageChannel: "messagechat",
       suppressExecNotifyOnExit: true,
-      toolPolicy: {
-        requireExplicitMessageTarget: false,
-        disableMessageTool: false,
-        forceMessageTool: true,
-      },
+      sourceDelivery: createSourceDeliveryPlan({
+        owner: "message_tool_then_direct_fallback",
+        reason: "cron_announce",
+        target: {
+          channel: resolvedDelivery.channel ?? "messagechat",
+          to: resolvedDelivery.to,
+          accountId: resolvedDelivery.accountId,
+          threadId: resolvedDelivery.threadId,
+        },
+        messageToolEnabled: true,
+        messageToolForced: true,
+        directFallback: true,
+      }),
       skillsSnapshot: emptySkillsSnapshot,
       agentPayload: null,
       useSubagentFallbacks: false,
@@ -513,8 +531,8 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
   it("forwards explicit message targets into the embedded run", async () => {
     mockRunCronFallbackPassthrough();
     const executor = createMessageToolExecutor({
-      messageChannel: "topicchat",
       resolvedDelivery: {
+        channel: "topicchat",
         accountId: "ops",
         to: "room#42",
         threadId: 42,
@@ -536,8 +554,8 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
   it("lets channels build currentChannelId from split delivery fields", async () => {
     mockRunCronFallbackPassthrough();
     const executor = createMessageToolExecutor({
-      messageChannel: "topicchat",
       resolvedDelivery: {
+        channel: "topicchat",
         accountId: "ops",
         to: "room",
         threadId: 42,
@@ -787,8 +805,17 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
     expect(dispatchCronDeliveryMock).toHaveBeenCalledTimes(1);
     expectDispatchFields({
       deliveryRequested: true,
-      skipMessagingToolDelivery: false,
-      unverifiedMessagingToolDelivery: true,
+      sourceDeliveryOutcome: {
+        visibleDeliveries: [
+          {
+            via: "message_tool",
+            verifiedTarget: false,
+            target: { tool: "message", provider: "messagechat", to: "123" },
+          },
+        ],
+        satisfiesSourceDelivery: false,
+        unverifiedMessageToolDelivery: true,
+      },
     });
     const delivery = expectDeliveryFields(result.delivery, {
       intended: { channel: "last", to: null, source: "last" },
@@ -823,8 +850,17 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
     expect(dispatchCronDeliveryMock).toHaveBeenCalledTimes(1);
     expectDispatchFields({
       deliveryRequested: false,
-      skipMessagingToolDelivery: false,
-      unverifiedMessagingToolDelivery: true,
+      sourceDeliveryOutcome: {
+        visibleDeliveries: [
+          {
+            via: "message_tool",
+            verifiedTarget: false,
+            target: { tool: "message", provider: "messagechat", to: "123" },
+          },
+        ],
+        satisfiesSourceDelivery: false,
+        unverifiedMessageToolDelivery: true,
+      },
     });
     expect(result.delivered).toBe(false);
     expect(result.deliveryAttempted).toBe(false);
