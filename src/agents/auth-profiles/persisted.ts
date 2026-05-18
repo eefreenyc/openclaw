@@ -35,7 +35,6 @@ import type {
 export type LegacyAuthStore = Record<string, AuthProfileCredential>;
 
 type LoadPersistedAuthProfileStoreOptions = {
-  allowKeychainPrompt?: boolean;
   resolveLegacyOAuthSidecars?: boolean;
 };
 
@@ -278,14 +277,13 @@ function resolveLegacyOAuthSidecarCredential(params: {
   ) {
     return params.credential;
   }
-  // Read-only compatibility for #79006 sidecar OAuth profiles. Do not add
-  // new writers or OS-level Keychain creation here; doctor remains the path
-  // that migrates users back to canonical inline OAuth credentials.
+  // Read-only compatibility for #79006 sidecar OAuth profiles. Do not add new
+  // writers, prompts, or OS-level Keychain access here; encrypted sidecars must
+  // decrypt from explicit env/file seeds or be repaired by doctor/re-auth.
   const material = loadLegacyOAuthSidecarMaterial({
     ref: params.raw.oauthRef,
     profileId: params.profileId,
     provider: params.credential.provider,
-    allowKeychainPrompt: params.options?.allowKeychainPrompt,
   });
   if (!material) {
     return params.credential;
@@ -841,7 +839,6 @@ function isUnchangedLegacyOAuthSidecarMaterial(params: {
     ref: params.rawProfile.oauthRef,
     profileId: params.profileId,
     provider: params.credential.provider,
-    allowKeychainPrompt: false,
   });
   if (!material) {
     return false;

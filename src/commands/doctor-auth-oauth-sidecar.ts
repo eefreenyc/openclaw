@@ -1,4 +1,3 @@
-import * as childProcess from "node:child_process";
 import { createDecipheriv, createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -21,8 +20,6 @@ const LEGACY_OAUTH_SECRET_DIRNAME = "auth-profiles";
 const LEGACY_OAUTH_SECRET_VERSION = 1;
 const LEGACY_OAUTH_SECRET_ALGORITHM = "aes-256-gcm";
 const LEGACY_OAUTH_SECRET_KEY_ENV = "OPENCLAW_AUTH_PROFILE_SECRET_KEY";
-const LEGACY_OAUTH_SECRET_KEYCHAIN_SERVICE = "OpenClaw Auth Profile Secrets";
-const LEGACY_OAUTH_SECRET_KEYCHAIN_ACCOUNT = "oauth-profile-master-key";
 const LEGACY_OAUTH_SECRET_KEY_FILE_NAME = "auth-profile-secret-key";
 
 type AuthProfileRepairCandidate = {
@@ -328,38 +325,6 @@ function readLegacyOAuthSecretKeyFile(env: NodeJS.ProcessEnv): string | undefine
   }
 }
 
-function readLegacyMacOAuthSecretKeychainKey(): string | undefined {
-  if (
-    process.platform !== "darwin" ||
-    process.env.VITEST === "true" ||
-    process.env.VITEST_WORKER_ID !== undefined
-  ) {
-    return undefined;
-  }
-  try {
-    // Legacy removal-only migration for #79006 sidecar OAuth profiles.
-    // Do not add or normalize any OS-level Keychain integrations in OpenClaw.
-    // Keychain access here exists only so doctor can move affected users back
-    // to the canonical inline auth-profiles.json OAuth credential shape.
-    return childProcess
-      .execFileSync(
-        "security",
-        [
-          "find-generic-password",
-          "-s",
-          LEGACY_OAUTH_SECRET_KEYCHAIN_SERVICE,
-          "-a",
-          LEGACY_OAUTH_SECRET_KEYCHAIN_ACCOUNT,
-          "-w",
-        ],
-        { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] },
-      )
-      .trim();
-  } catch {
-    return undefined;
-  }
-}
-
 function resolveLegacyOAuthSecretKeySeeds(env: NodeJS.ProcessEnv): string[] {
   const seeds: string[] = [];
   const addSeed = (value: string | undefined): void => {
@@ -423,10 +388,6 @@ function decryptLegacyOAuthSecretMaterial(params: {
       return material;
     }
   }
-  const keychainSeed = readLegacyMacOAuthSecretKeychainKey();
-  if (keychainSeed && !seeds.includes(keychainSeed)) {
-    return decryptLegacyOAuthSecretMaterialWithSeed(params, keychainSeed);
-  }
   return null;
 }
 
@@ -481,6 +442,13 @@ function applyLegacyOAuthSidecarMaterial(params: {
     entry.idToken = params.material.idToken;
   }
   return true;
+}
+
+function formatUndecryptableLegacyOAuthSidecarWarning(
+  profile: LegacyOAuthSidecarProfile,
+  authPath: string,
+): string {
+  return `Could not decrypt legacy OAuth sidecar for ${profile.profileId} in ${shortenHomePath(authPath)}; OpenClaw no longer reads macOS Keychain for legacy sidecar secrets. Re-authenticate with ${formatCliCommand("openclaw models auth login --provider openai-codex")}.`;
 }
 
 function backupLegacyOAuthSidecarStore(authPath: string, now: () => number): string {
@@ -553,9 +521,7 @@ export async function maybeRepairLegacyOAuthSidecarProfiles(params: {
       const material = loadLegacyOAuthSidecarMaterial(profile, env);
       if (!material) {
         unresolvedRefIds.add(profile.ref.id);
-        result.warnings.push(
-          `Could not decrypt legacy OAuth sidecar for ${profile.profileId} in ${shortenHomePath(store.authPath)}; re-authenticate this profile.`,
-        );
+        result.warnings.push(formatUndecryptableLegacyOAuthSidecarWarning(profile, store.authPath));
         continue;
       }
       if (applyLegacyOAuthSidecarMaterial({ raw: store.raw, profile, material })) {

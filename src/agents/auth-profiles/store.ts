@@ -79,15 +79,10 @@ type ExternalCliSyncResult = {
 };
 
 function resolvePersistedLoadOptions(
-  options:
-    | Pick<LoadAuthProfileStoreOptions, "allowKeychainPrompt" | "resolveLegacyOAuthSidecars">
-    | undefined,
-): { allowKeychainPrompt?: boolean; resolveLegacyOAuthSidecars?: boolean } {
+  options: Pick<LoadAuthProfileStoreOptions, "resolveLegacyOAuthSidecars"> | undefined,
+): { resolveLegacyOAuthSidecars?: boolean } {
   return {
     resolveLegacyOAuthSidecars: options?.resolveLegacyOAuthSidecars ?? true,
-    ...(options?.allowKeychainPrompt !== undefined
-      ? { allowKeychainPrompt: options.allowKeychainPrompt }
-      : {}),
   };
 }
 
@@ -140,10 +135,7 @@ function shouldUseMainOwnerForLocalOAuthCredential(params: {
   );
 }
 
-function resolveRuntimeAuthProfileStore(
-  agentDir?: string,
-  options?: Pick<LoadAuthProfileStoreOptions, "allowKeychainPrompt">,
-): AuthProfileStore | null {
+function resolveRuntimeAuthProfileStore(agentDir?: string): AuthProfileStore | null {
   const mainKey = resolveAuthStorePath(undefined);
   const requestedKey = resolveAuthStorePath(agentDir);
   const mainStore = getRuntimeAuthProfileStoreSnapshot(undefined);
@@ -163,7 +155,6 @@ function resolveRuntimeAuthProfileStore(
     const persistedMainStore = loadAuthProfileStoreForAgent(undefined, {
       readOnly: true,
       syncExternalCli: false,
-      ...resolvePersistedLoadOptions(options),
     });
     return mergeAuthProfileStores(persistedMainStore, requestedStore);
   }
@@ -641,7 +632,7 @@ export function ensureAuthProfileStoreWithoutExternalProfiles(
   agentDir?: string,
   options?: { allowKeychainPrompt?: boolean },
 ): AuthProfileStore {
-  const runtimeStore = resolveRuntimeAuthProfileStore(agentDir, options);
+  const runtimeStore = resolveRuntimeAuthProfileStore(agentDir);
   if (runtimeStore) {
     return runtimeStore;
   }
