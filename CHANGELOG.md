@@ -28,7 +28,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
-- Config/subagents: accept the shared model config shape, including `timeoutMs`, for per-agent and tools subagent model overrides. Fixes #83291. Thanks @giodl73-repo.
+- Config/subagents: keep spawned sub-agent model config limited to model selection and reject `timeoutMs` consistently. Fixes #83291. Thanks @giodl73-repo.
 - Mac app: align the Sessions settings pane with the standard Settings page gutter and row spacing.
 - Codex app-server: preserve streamed native command output in mirrored transcripts and trajectory exports when final snapshots omit aggregated output. (#83200) Thanks @rozmiarD.
 - Codex app-server: fail closed when chat or sender policy denies tools, disabling native code, app, environment, and user MCP surfaces for restricted turns. (#82374) Thanks @VACInc.
